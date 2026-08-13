@@ -1,0 +1,24 @@
+[Unit]
+Description=BirdDog PLAY USB media player
+After=network.target BirdDogWebUI.service
+# Deliberately NOT After/Requires BirdDogRunner: bdplay stops and starts that
+# unit itself when it takes the display, and a dependency would make systemd
+# fight us over it.
+
+[Service]
+Type=simple
+ExecStart=/userdata/bd-play/bdplay \
+    -addr :8091 \
+    -state-dir /userdata/bd-play
+Restart=always
+RestartSec=3
+# Give the daemon time to stop a pipeline and restart BirdDogRunner on the way
+# out. A SIGKILL here is what leaves the unit dark with PPApp not running.
+TimeoutStopSec=30
+KillSignal=SIGTERM
+# Playback is the point of the box while it is running; keep it ahead of the
+# housekeeping daemons but behind BirdDog's own decode nice level (-15).
+Nice=-10
+
+[Install]
+WantedBy=multi-user.target
