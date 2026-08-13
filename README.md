@@ -29,6 +29,24 @@ stock decode path comes straight back.
                               (hardware)              + alsasink hw:1,0
 ```
 
+## Screenshots
+
+The control page at `http://<play>:8091/`, on a real PLAY mid-playlist — the
+library off the drive, the transport, and the log that answers most "why won't
+this play" questions:
+
+![bdplay's control page, showing a five-item library, transport controls, live status and log](docs/control-ui.png)
+
+Installing it needs no toolchain: it is a checkbox in the
+[PLAY Patcher](https://birddog-play-patcher.stoatworks-labs.com), which
+assembles the firmware package in your browser.
+
+![The USB media player option in the BirdDog PLAY Patcher, showing PDF and exFAT support and the package size it adds](docs/patcher-option.png)
+
+The third surface is the **USB** entry this adds to birdUI's own Source
+Selection dropdown, with the same picker injected into that page. It is not
+shown here because those pages sit behind the device's web-UI login.
+
 ## What it plays
 
 | Type | Formats | How |

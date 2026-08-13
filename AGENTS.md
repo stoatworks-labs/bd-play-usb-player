@@ -1,10 +1,11 @@
-# AGENTS.md — bdplay
+# AGENTS.md — bd-play-usb-player (bdplay)
 
 USB media player for the **BirdDog PLAY** (Rockchip RK3328, quad A53, Debian 10
 aarch64). Adds a **USB** entry to birdUI's source dropdown and plays video,
 stills and PDFs off a USB stick, straight to HDMI. Go, cross-compiled for the
-device. **Private repo** — see the licence note below before considering
-otherwise.
+device. **Public repo (MIT)** — it is shipped from the public
+[PLAY Patcher](https://birddog-play-patcher.stoatworks-labs.com), so read the
+licence note below before adding any dependency.
 
 Start with [`README.md`](README.md) for the design and the hardware
 measurements behind it. This file is the operating rules.
@@ -21,7 +22,10 @@ firmware into this repo.
 Sibling checkouts under `~/Projects` are assumed: `birddog-re` (research),
 `bdkvm` (NDI KVM), `bdcam` (UVC → NDI). `birddog-re`'s `tools/fwbuild` builds
 the installable `.fw` and finds this repo's binary at
-`../bdplay/dist/bdplay-linux-arm64` (override with `BDPLAY=`).
+`../bd-play-usb-player/dist/bdplay-linux-arm64` (override with `BDPLAY=`).
+The repo is `bd-play-usb-player`; the binary, service and command are all
+`bdplay`. Keep the checkout directory named after the repo — a mismatch between
+the two is a recurring source of broken sibling paths in this fleet.
 
 ## Hard rules
 
