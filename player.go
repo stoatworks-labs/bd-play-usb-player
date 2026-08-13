@@ -151,6 +151,15 @@ func (p *Player) run(pl *Playlist, stop <-chan struct{}, done chan<- struct{}) {
 		switch {
 		case err == nil:
 			consecutiveFailures = 0
+			// Clear a previous item's error once something plays cleanly.
+			// Without this a single transient failure — imagefreeze losing a
+			// race with our own SIGINT, say — stays on screen for the rest of
+			// the session, so a healthy playlist on its twelfth loop still
+			// shows a scary red line about an item that has played fine many
+			// times since.
+			p.mu.Lock()
+			p.lastErr = ""
+			p.mu.Unlock()
 		case isStopped(err):
 			return
 		default:

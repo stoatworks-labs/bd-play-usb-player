@@ -43,9 +43,11 @@ assembles the firmware package in your browser.
 
 ![The USB media player option in the BirdDog PLAY Patcher, showing PDF and exFAT support and the package size it adds](docs/patcher-option.png)
 
-The third surface is the **USB** entry this adds to birdUI's own Source
-Selection dropdown, with the same picker injected into that page. It is not
-shown here because those pages sit behind the device's web-UI login.
+And in place, inside birdUI's own AV Setup page: **USB** selected in BirdDog's
+Source Selection, with the picker injected below it. The stock page is
+untouched apart from one added `<option>`.
+
+![The USB media player panel injected into birdUI's AV Setup page, with USB chosen in BirdDog's own Source Selection dropdown](docs/birdui-panel.png)
 
 ## What it plays
 
