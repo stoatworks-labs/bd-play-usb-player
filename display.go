@@ -90,12 +90,38 @@ func (d *Display) restoreLocked() {
 		return
 	}
 	d.log.Info("restarting %s", birdDogRunner)
+
+	// Clear a failed state first. BirdDog's runner aborts in its own C++ during
+	// NDI receiver teardown (`terminate called without an active exception`,
+	// SIGABRT), and cycling it — which is exactly what this player does — makes
+	// that more likely. Once it has failed enough times systemd rate-limits it
+	// and plain `start` is refused, so without reset-failed a unit can be left
+	// permanently dark: HDMI black, web UI up, no decode. Harmless when the unit
+	// is healthy.
+	if out, err := exec.Command("systemctl", "reset-failed", birdDogRunner).CombinedOutput(); err != nil {
+		d.log.Warn("reset-failed %s: %v: %s", birdDogRunner, err, strings.TrimSpace(string(out)))
+	}
+
 	if out, err := exec.Command("systemctl", "start", birdDogRunner).CombinedOutput(); err != nil {
 		// Worth shouting about: this is the state that looks like a bricked
 		// unit (dark HDMI, web UI up, no decode).
-		d.log.Error("FAILED to restart %s: %v: %s — the unit will not decode NDI until this is fixed (systemctl start %s)",
-			birdDogRunner, err, strings.TrimSpace(string(out)), birdDogRunner)
+		d.log.Error("FAILED to restart %s: %v: %s — the unit will not decode NDI until this is fixed (systemctl reset-failed %s && systemctl start %s)",
+			birdDogRunner, err, strings.TrimSpace(string(out)), birdDogRunner, birdDogRunner)
+		return
 	}
+
+	// Confirm the decoder actually came back. `systemctl start` returning 0
+	// only means systemd accepted the job; PPApp can still abort seconds later,
+	// and a silent failure here is the one outcome users read as a brick.
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if processRunning("PPApp") {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	d.log.Error("%s was started but PPApp is not running after 15s — HDMI output will be dark. Check 'journalctl -u %s'",
+		birdDogRunner, birdDogRunner)
 }
 
 // Held reports whether we currently own the display.

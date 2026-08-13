@@ -163,6 +163,14 @@ output and a working web UI, which reads as bricked — hence the belt and brace
   modules — however it *does* have FUSE, so this is a userspace driver and
   needs no kernel or image change. Without the helper, exFAT sticks do not
   mount at all; the status API reports which is the case.
+- **Switching sources repeatedly destabilises BirdDog's decoder.** Taking the
+  display means stopping `BirdDogRunner`, and its `birddog-runner` aborts in its
+  own C++ during NDI receiver teardown (`terminate called without an active
+  exception`, SIGABRT). Measured on one unit over an afternoon of testing: **0
+  aborts before bdplay was installed, 30 after.** It restarts each time, and
+  bdplay now clears a `failed` state before starting it and verifies PPApp
+  actually returns — but if you switch between USB and NDI constantly, expect
+  the odd dropout. Treat the mode as something you set, not something you flick.
 - **~300 ms of black between items.** One GStreamer process per item, because
   the 2020-vintage `rockchipmpp` plugin does not renegotiate caps gracefully
   across a mode change mid-pipeline. Restarting is the robust trade.

@@ -35,6 +35,16 @@ the two is a recurring source of broken sibling paths in this fleet.
    dead has a dark HDMI output and a working web UI, which reads to a user as
    bricked. `display.go` owns this; if you add an early return to the playback
    loop, check the `defer p.display.Release()` still covers it.
+   - **`systemctl start` alone is not enough.** BirdDog's runner aborts in its
+     own C++ during NDI receiver teardown (SIGABRT), and cycling it makes that
+     likelier — **0 aborts before bdplay was installed on the test unit, 30
+     after**. Once systemd rate-limits a repeatedly-failing unit, plain `start`
+     is refused and the unit stays dark, so `Release()` calls `reset-failed`
+     first and then **confirms PPApp actually came back**. Do not remove either:
+     `systemctl start` returning 0 only means systemd accepted the job.
+   - Corollary for testing: **do not induce runner crashes to exercise this
+     path.** Deliberately aborting the decoder to test recovery is the same harm
+     the rule exists to prevent.
 2. **Never modify a firmware file without a backup and an atomic write.**
    `videoset.html` is 370 KB of Go template that the whole web UI depends on;
    a truncated write takes birdUI down entirely. `patch.go` writes via temp
