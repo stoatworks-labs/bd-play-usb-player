@@ -149,3 +149,10 @@ patch/unpatch round trip. Everything else needs the device.
 
 There is no emulation path — RK3328, MPP and KMS cannot be faked. Use
 `-media-dir` to exercise the player from internal storage without a stick.
+
+## Notes
+
+`docs/NOTES.md` carries this repo's working notes — current status, decisions
+already made, and the traps that have actually bitten. Read it before changing
+anything non-obvious. Cross-cutting fleet knowledge lives in
+[fleet-notes](https://github.com/stoatworks-labs/fleet-notes).
