@@ -62,9 +62,22 @@ type Player struct {
 	stopCh chan struct{}
 	doneCh chan struct{}
 
+	// onDone, if set, is called on the playback goroutine whenever a session
+	// ends for any reason — playlist exhausted, stopped, or given up on. The
+	// remote-control session uses it to drop back to the on-screen browser.
+	// It must not block and must not call back into the Player.
+	onDone func()
+
 	display *Display
 	pdf     *PDFRenderer
 	log     *Logger
+}
+
+// SetOnDone installs the end-of-session hook. See Player.onDone.
+func (p *Player) SetOnDone(fn func()) {
+	p.mu.Lock()
+	p.onDone = fn
+	p.mu.Unlock()
 }
 
 func NewPlayer(display *Display, pdf *PDFRenderer, log *Logger) *Player {
@@ -120,6 +133,14 @@ func (p *Player) Start(items []Item, opts Options) error {
 func (p *Player) run(pl *Playlist, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
 	defer p.display.Release()
+	defer func() {
+		p.mu.Lock()
+		fn := p.onDone
+		p.mu.Unlock()
+		if fn != nil {
+			fn()
+		}
+	}()
 
 	// consecutiveFailures guards against a playlist of entirely undecodable
 	// files spinning the CPU in a tight restart loop. A stick full of

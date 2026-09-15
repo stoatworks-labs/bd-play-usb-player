@@ -121,6 +121,53 @@ curl -X POST 'http://<play>:8091/api/stop'
 | `POST /api/options` | change order/loop mid-playback |
 | `POST /api/rescan` `/api/eject` | storage |
 | `GET /api/log` | recent log lines |
+| `GET /api/remote` | TV-remote session: active, browsing/playing, CEC address |
+| `POST /api/remote/enter` `/api/remote/exit` | open the on-screen browser / hand the display back |
+| `POST /api/remote/key?name=down` | press a remote key (`up down left right select back play stop next prev pageup pagedown red green yellow blue`) |
+
+## Using a TV remote
+
+A PLAY on a CEC-capable TV can already be driven from the TV's remote: BirdDog's
+decoder draws a source list on HDMI and Up/Down/OK on the remote pick an NDI, SRT
+or CloudConnect source from it. bdplay adds a **`USB-Player`** entry to that list
+(the SRT page — press Left/Right on the remote to reach it). Choosing it opens an
+on-screen file browser, and the same remote then drives that:
+
+| Key | In the list | While playing |
+|---|---|---|
+| Up / Down | move | — |
+| OK / Enter | open a folder, or play the file | on a held still: next |
+| Left | up one folder | previous item |
+| Right | open a folder | next item |
+| Exit / Return / Menu | up one folder; at the top, **back to BirdDog** | stop, back to the list |
+| Play (or green) | play everything in this folder | — |
+| Stop | back to BirdDog | back to the list |
+| ‹‹ / ›› / skip | — | previous / next item |
+| Red | back to BirdDog | back to BirdDog |
+| Blue | shuffle on/off | shuffle on/off |
+| Yellow | loop on/off | loop on/off |
+
+A file plays once and returns to the list (a picture stays up until you press
+a key); a folder loops until Stop. The browser is also reachable from the
+control page, from `POST /api/remote/enter`, and its keys from
+`/api/remote/key`, so it works — and can be tested — without a TV at all.
+
+Which keys a TV forwards varies by make: arrows and OK are universal, the
+transport and colour keys are common but not guaranteed, and some TVs need
+CEC (Anynet+, SimpLink, Bravia Sync, …) switched on in their settings first.
+The list plays fine from the web page if the remote does nothing.
+
+How it works, in one paragraph: picking the entry makes the decoder dial
+`127.0.0.1:9107` as an SRT caller; bdplay listens there, treats the first
+datagram as the selection, stops the decoder to take the display exactly as it
+does for the web UI, and then — with the decoder gone — opens `/dev/cec0` as a
+CEC *playback device* named "USB Player" and draws the browser through a
+long-lived `kmssink` pipeline fed raw frames. On the way out it closes CEC, puts
+the decoder's previous source back (the decoder persists its menu choice, and
+would otherwise dial the entry again the moment it restarted) and restarts
+`BirdDogRunner`. Flags: `-remote=false` turns the whole thing off,
+`-cec-device=` leaves the browser to the API, `-osd-entry` / `-osd-port` rename
+or move the entry, and `bdplay -unregister-osd-entry` removes it from the list.
 
 ## How the dropdown integration works
 
@@ -179,6 +226,14 @@ output and a working web UI, which reads as bricked — hence the belt and brace
   on four A53s and will stutter above SD.
 - The PLAY locks its HDMI output mode to the first stream it sees, so a mode
   change may need a restart of the decode stack to take effect.
+- **No pause.** Playback is a `gst-launch` process with no control channel, so
+  the remote's Pause key is ignored; Stop returns to the list instead.
+- **The TV-remote mode has not yet run on a PLAY.** The CEC and pipeline code
+  was written against the firmware's own decoder (which opens the same
+  `/dev/cec0` and uses the same kernel interface) and is unit-tested with fakes,
+  but the first end-to-end run — entry in the decoder's list, `/dev/cec0`
+  claim, the raw-frame `kmssink` pipeline, which keys the TV forwards — is
+  still to happen. `docs/NOTES.md` lists what to check.
 
 ## Licence
 

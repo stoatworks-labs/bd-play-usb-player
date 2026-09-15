@@ -154,5 +154,75 @@ configured and the next `kmssink` fails to set a mode; **random reshuffles a
 permutation per cycle** rather than picking independently, so nothing starves,
 and the reshuffle never puts the just-played item first.
 
+**TV-remote mode (2026-09-15, built from the firmware, NOT yet run on a PLAY —
+`birddog-play-42` had been offline a month).** The question was whether the
+features we patch in can be reached from the PLAY's own HDMI OSD via CEC. What
+the 1.0.34 `PPApp` disassembly settled:
+- **Stock CEC is PPApp's and only PPApp's.** With no arguments it opens
+  `/dev/cec0` as `CEC_S_MODE = 0x31` (INITIATOR | EXCL_FOLLOWER_PASSTHRU),
+  claims a Playback logical address (empty OSD name) and **never calls
+  CEC_TRANSMIT** — so it answers no <Give OSD Name>/<Give Physical Addr> and
+  sends no <Active Source>; only the kernel's <Report Physical Address> at
+  claim time tells the TV where it is. That is why BirdDog's own manual says
+  "try all CEC modes". Its OSD driver maps **exactly** UI codes 0x00 Select,
+  0x01 Up, 0x02 Down, 0x03 Left, 0x04 Right (Left/Right = page between the
+  NDI / SRT / CloudConnect lists); everything else is dropped. Any key shows
+  the OSD, ~5 s idle hides it. `--enable-ir` and `--osd-kb` drivers exist but
+  are off. ioctl sizes seen: caps 0x4c, msg 0x38, log_addrs 0x5c, event 0x50 —
+  mainline UAPI, pinned in `cec_test.go`.
+- **The OSD is a source list drawn from files**, so the one text we can put on
+  it is a source *name*: an entry in `/etc/birddog_srt_src.json` shows on the
+  SRT page. Picking it makes PPApp dial the URI as an SRT **caller** — the URI
+  must be exactly `host:port?mode=caller&latency=N` (the stock page parses it
+  by `split("&")[1]`), and the name must have **no spaces or punctuation**
+  (`$('#'+name)` in the stock page; bd-play-stream-gateway hit the colon case).
+  Hence `USB-Player` → `127.0.0.1:9107`, and the "listener" is a bare UDP
+  socket: the first handshake datagram is the trigger. No SRT is spoken.
+- **Exclusive follower means nobody else can follow while PPApp runs**, but
+  monitors (root) still can, and once PPApp is stopped for the display the
+  adapter is free — which is why the browser lives in bdplay: it already owns
+  the moments when PPApp is gone. `Display` grew `Hold`/`Unhold` (a pin that
+  makes `Release` a no-op) so a playlist ending inside the session returns to
+  the browser instead of bouncing the display through PPApp.
+- **The decoder persists its menu choice.** Assumed, not proven — but the safe
+  assumption: if PPApp restarted with our entry selected it would dial the
+  trigger again at once. `sourceGuard` polls `/etc/birddog-source1-name` and
+  `SourceSelection`, remembers the last non-USB pair, and writes it back
+  before `BirdDogRunner` starts; with no history it sets NDI. The trigger also
+  ignores datagrams for 15 s after a session (PPApp retries its connect).
+- **Drawing the browser**: PPApp is DRM master and 4.4 has no DRM leases, so
+  frames go through one long-lived `gst-launch fdsrc ! rawvideoparse !
+  videoconvert ! kmssink sync=false` fed RGBA on stdin (`rawvideoparse`
+  because a pipe delivers short reads and fdsrc alone would hand kmssink
+  fragments). It is probed with `gst-inspect-1.0 --exists`; the fallback is
+  `multifilesrc loop=true` re-reading a PNG we replace atomically. Only one
+  kmssink can own the plane, so the browser pipeline is stopped before every
+  playback and restarted after. Text is `golang.org/x/image` + the Go fonts
+  (BSD) — no arrows or media glyphs in those faces, so the legend draws dots
+  and the rows draw their own icons.
+
+**Hardware checklist for the first run** (in order; each one can fail alone):
+1. `bdplay` start log: `added "USB-Player" to the decoder's on-screen source
+   list` and nothing about the trigger port. `cat /etc/birddog_srt_src.json`.
+2. On the TV: Left/Right to the SRT page, `USB-Player` listed, OK on it. Log:
+   `trigger: 64-byte datagram from 127.0.0.1:…`, then `stopping
+   BirdDogRunner`. If PPApp is *not* a caller for that URI shape, nothing
+   arrives — check with `tcpdump -i lo udp port 9107`.
+3. `cec: claimed logical address N as "USB Player"` — if `CEC_S_MODE` fails
+   with EBUSY, PPApp was still alive (Hold's 10 s wait was not enough); if
+   "no logical address after 4s", the adapter has no physical address (EDID).
+4. The browser on HDMI via the raw pipeline (`remote: browser on screen at
+   WxH via the raw pipeline`). If black: `gst-launch-1.0 fdsrc fd=0 !
+   rawvideoparse … ! kmssink` by hand with `/dev/zero`; try `-osd-pipeline=png`.
+5. Which keys the TV forwards: `journalctl -u bd-play | grep 'cec:'` shows
+   `ignoring user control 0x..` for anything unmapped. Arrows/OK are the
+   floor; check Exit, Play/Stop, skip, colour keys per TV.
+6. Leaving (Red): `decoder source restored to …`, PPApp back, and — the loop
+   test — it must **not** re-enter by itself within 30 s. If it does, the
+   guard's restore did not take: compare `/etc/birddog-source1-name` before
+   and after.
+7. Idle 4K panels: the frame is rendered at the detected mode (33 MB at 4K);
+   if `Show` is slow, render at 1080p and rely on kmssink `can-scale`.
+
 Related: [birddog re](https://github.com/stoatworks-labs/birddog-re/blob/main/docs/NOTES.md) (`birddog-re`), [birddog play patcher](https://github.com/stoatworks-labs/birddog-play-patcher/blob/main/docs/NOTES.md) (`birddog-play-patcher`),
 **cosession shared checkout** (working-practice note, kept in Claude memory).

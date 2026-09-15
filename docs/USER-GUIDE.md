@@ -50,6 +50,29 @@ because the log answers most of those questions.
 
 Everything is drivable from the API too, so a Companion button or a cron job works.
 
+### From the TV's remote
+
+If the TV supports HDMI-CEC (Samsung call it Anynet+, LG SimpLink, Sony Bravia Sync — it is usually
+on by default), the PLAY's own on-screen source list is already driven by the TV's remote. bdplay
+adds a **USB-Player** entry to that list: press **Left/Right** to reach the SRT page, **Up/Down** to
+it and **OK**. A file browser for the stick appears on the TV, driven by the same remote:
+
+| Key | Does |
+|---|---|
+| **Up / Down** | move through the list |
+| **OK** | open a folder, or play the file |
+| **Left**, **Exit / Return** | back up a folder — and at the top, back to BirdDog |
+| **Play** (or the green key) | play everything in this folder, looping |
+| **Stop** | while playing: back to the list — in the list: back to BirdDog |
+| **‹‹ / ››** (or Left / Right while playing) | previous / next item |
+| **Red** | straight back to BirdDog |
+| **Blue** / **Yellow** | shuffle / loop on and off |
+
+A single file plays once and returns to the list; a picture stays up until you press a key. The
+same browser can be opened from the control page on port 8091 (**OPEN BROWSER ON HDMI**), which
+also has the remote's keys as buttons — handy when the TV forwards only some of them, which varies
+by make. Arrows and OK work on every CEC TV; the transport and colour keys on most.
+
 ---
 
 ## What it plays
@@ -90,3 +113,5 @@ the item that just played at the front of the next cycle.**
 | **A PowerPoint file is listed and does nothing** | Deliberate. Export it to PDF. |
 | **The stick was not picked up** | Hotplug with a physical stick is the one path still unverified. Re-seat it, or reboot with it in. |
 | **NDI stopped when I selected USB** | Correct — the stock decoder hands over the display. Select NDI again and it comes back. |
+| **The TV remote does nothing in the browser** | The TV is not forwarding keys: check its CEC setting, and that the PLAY is the input it is showing. Use the buttons on the control page meanwhile. |
+| **USB-Player is not in the PLAY's on-screen list** | It is on the SRT page of that list (Left/Right), and only while the bd-play service runs. |

@@ -27,6 +27,8 @@ type Server struct {
 	player  *Player
 	pdf     *PDFRenderer
 	log     *Logger
+	// remote is the TV-remote session, nil when -remote=false.
+	remote *Remote
 
 	mu      sync.Mutex
 	library *Library
@@ -91,6 +93,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/rescan", s.wrap(s.handleRescan))
 	mux.HandleFunc("/api/eject", s.wrap(s.handleEject))
 	mux.HandleFunc("/api/log", s.wrap(s.handleLog))
+	mux.HandleFunc("/api/remote", s.wrap(s.handleRemote))
+	mux.HandleFunc("/api/remote/enter", s.wrap(s.handleRemoteEnter))
+	mux.HandleFunc("/api/remote/exit", s.wrap(s.handleRemoteExit))
+	mux.HandleFunc("/api/remote/key", s.wrap(s.handleRemoteKey))
 	mux.HandleFunc("/bd-play.js", s.handleInjectJS)
 	return mux
 }
@@ -136,6 +142,8 @@ type StatusResponse struct {
 	ExfatReady bool      `json:"exfat_ready"`
 	Selection  Selection `json:"selection"`
 	Version    string    `json:"version"`
+	// Remote is the TV-remote session, absent when the feature is off.
+	Remote *RemoteStatus `json:"remote,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +159,10 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	resp.Selection = s.lastSelection
 	s.mu.Unlock()
+	if s.remote != nil {
+		st := s.remote.Status()
+		resp.Remote = &st
+	}
 
 	s.storage.mu.Lock()
 	resp.ExfatReady = s.storage.exfatHelper != ""
@@ -229,12 +241,21 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 		dwell = DefaultImageDwell
 	}
 
-	if err := s.player.Start(items, Options{
+	opts := Options{
 		Order:      sel.Order,
 		Loop:       sel.Loop,
 		ImageDwell: dwell,
 		Mute:       sel.Mute,
-	}); err != nil {
+	}
+	// While the TV-remote session owns the display, playback goes through
+	// it, so the on-screen browser comes back when the playlist ends
+	// instead of the display bouncing to PPApp and back.
+	if s.remote != nil && s.remote.Active() {
+		if err := s.remote.PlayExternal(items, opts); err != nil {
+			writeErr(w, http.StatusInternalServerError, "%v", err)
+			return
+		}
+	} else if err := s.player.Start(items, opts); err != nil {
 		writeErr(w, http.StatusInternalServerError, "%v", err)
 		return
 	}
@@ -247,8 +268,71 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	// Stop means "give the display back": a running remote session ends
+	// too, or the browser would simply reappear.
+	if s.remote != nil {
+		s.remote.Exit()
+	}
 	s.player.Stop()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// The TV-remote session: status, enter, leave, and key injection — the last
+// so the whole browser can be driven from curl or a Companion button, and
+// tested without a television.
+
+func (s *Server) handleRemote(w http.ResponseWriter, r *http.Request) {
+	if s.remote == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "active": false})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.remote.Status())
+}
+
+func (s *Server) handleRemoteEnter(w http.ResponseWriter, r *http.Request) {
+	if s.remote == nil {
+		writeErr(w, http.StatusConflict, "the TV-remote mode is disabled (-remote=false)")
+		return
+	}
+	if err := s.remote.Enter("requested over the API from " + r.RemoteAddr); err != nil {
+		writeErr(w, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.remote.Status())
+}
+
+func (s *Server) handleRemoteExit(w http.ResponseWriter, r *http.Request) {
+	if s.remote == nil {
+		writeErr(w, http.StatusConflict, "the TV-remote mode is disabled (-remote=false)")
+		return
+	}
+	s.remote.Exit()
+	writeJSON(w, http.StatusOK, s.remote.Status())
+}
+
+func (s *Server) handleRemoteKey(w http.ResponseWriter, r *http.Request) {
+	if s.remote == nil {
+		writeErr(w, http.StatusConflict, "the TV-remote mode is disabled (-remote=false)")
+		return
+	}
+	name := r.URL.Query().Get("name")
+	if name == "" && r.Body != nil {
+		var body struct {
+			Key string `json:"key"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		name = body.Key
+	}
+	k, ok := ParseKey(name)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "unknown key %q (up, down, left, right, select, back, pageup, pagedown, play, pause, stop, next, prev, info, red, green, yellow, blue, eject)", name)
+		return
+	}
+	if err := s.remote.Key(k); err != nil {
+		writeErr(w, http.StatusConflict, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "key": k.String()})
 }
 
 func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {

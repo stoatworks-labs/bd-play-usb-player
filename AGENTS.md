@@ -58,6 +58,17 @@ the two is a recurring source of broken sibling paths in this fleet.
 5. **Never write to the USB stick.** Volumes are mounted read-only on purpose —
    people unplug these without ejecting, and a read-only mount cannot be
    corrupted by that.
+6. **CEC is opened only after PPApp is gone and closed before it comes back.**
+   The stock decoder holds `/dev/cec0` as an *exclusive* follower for its own
+   source-list OSD. Opening it underneath PPApp fails; leaving ours open while
+   `BirdDogRunner` restarts makes PPApp's `CEC_S_MODE` fail with EBUSY and its
+   TV-remote menu is dead until the next restart. `remote.go`'s `finish()`
+   owns that order — CEC closed, decoder source restored, *then* `Unhold`.
+7. **Restore the decoder's source before returning the display.** PPApp
+   persists its on-screen menu choice; if it restarts with our SRT entry still
+   selected it dials the trigger port immediately and re-enters the player —
+   a loop. `sourceGuard` remembers the last non-USB selection and puts it back;
+   do not remove that step to "simplify" the exit path.
 
 ## Licence: three helpers, none vendored
 
@@ -121,6 +132,17 @@ assuming they hold on another firmware.
   NDI/CloudConnect/SRT allowlist, and the Express API on :8080 has no branch
   for the field at all. **You cannot make the stock handler understand "USB"** —
   the injected script intercepts the change event instead.
+- **PPApp's own CEC support** (read out of the 1.0.34 binary, not measured):
+  it opens `/dev/cec0` as `CEC_MODE_INITIATOR | CEC_MODE_EXCL_FOLLOWER_PASSTHRU`,
+  claims a Playback logical address with an empty OSD name, never transmits,
+  and its OSD driver acts on exactly five `<User Control Pressed>` codes —
+  Select, Up, Down, Left, Right (Left/Right page between the NDI, SRT and
+  CloudConnect lists). Its ioctl numbers are the mainline UAPI ones, which is
+  what `cec_test.go` pins ours to. The kernel has `dw-hdmi-cec` and the CEC
+  core; the live device tree muxes the CEC pin.
+- **The TV-remote mode has not yet run on hardware** — see `docs/NOTES.md`
+  for the checklist (entry appears in the decoder's list, `/dev/cec0` claim,
+  the raw-frame `kmssink` pipeline, which keys the TV forwards).
 
 ## Layout
 
@@ -136,6 +158,15 @@ bdpdf/         the PDFium CLI wrapper (C) + its cross-build
 api.go         REST API
 ui.go          injected birdUI script + standalone control page
 patch.go       videoset.html patch / unpatch
+remote.go      TV-remote session: display pin, browser <-> playback, CEC lifetime
+menu.go        the browser's model (one folder, cursor, window)
+osd_render.go  drawing the browser (pure Go, bundled fonts) into RGBA frames
+screen.go      the long-lived kmssink pipeline the frames go to (raw or PNG)
+cec.go         Linux CEC UAPI: structs, ioctl numbers, opcodes
+cec_linux.go   /dev/cec0: open, claim a Playback address, pump messages
+cec_follower.go what we say on the bus; remote keys -> Key
+keys.go        the Key vocabulary and the CEC user-control mapping
+trigger.go     our entry in the decoder's SRT list, the UDP trigger, sourceGuard
 packaging/     systemd unit + installer
 tools/         build-mutool.sh (opt-in, AGPL)
 ```
@@ -144,8 +175,13 @@ tools/         build-mutool.sh (opt-in, AGPL)
 
 `go test ./...` covers the parts that are pure logic and easy to get subtly
 wrong: natural sort, library scanning and selection (including traversal
-refusal), playlist permutation properties, URI escaping, and the birdUI
-patch/unpatch round trip. Everything else needs the device.
+refusal), playlist permutation properties, URI escaping, the birdUI
+patch/unpatch round trip, the CEC struct layout and ioctl numbers (pinned to
+the ones PPApp uses), the follower's replies, the browser model, the renderer,
+the SRT-list entry and source restore, and the whole remote session against
+fake display/player/screen/CEC. `OSD_PREVIEW=out.png go test -run Preview .`
+writes a 1080p frame of the browser to look at. Everything else needs the
+device.
 
 There is no emulation path — RK3328, MPP and KMS cannot be faked. Use
 `-media-dir` to exercise the player from internal storage without a stick.

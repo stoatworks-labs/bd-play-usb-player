@@ -32,6 +32,12 @@ type Display struct {
 	mu sync.Mutex
 	// held is true while we have stopped BirdDog's stack for our own use.
 	held bool
+	// pinned counts callers that want the display kept past the end of a
+	// playlist. The remote-control session pins it: a clip finishing there
+	// should drop back to the on-screen browser, not hand the HDMI output to
+	// PPApp and then take it straight back. Release is a no-op while pinned;
+	// Unhold releases when the last pin goes.
+	pinned int
 	// wasActive records whether BirdDogRunner was running before we took over,
 	// so that a device where the user had already stopped it stays stopped.
 	wasActive bool
@@ -44,6 +50,36 @@ func NewDisplay(log *Logger) *Display { return &Display{log: log} }
 func (d *Display) Acquire() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	return d.acquireLocked()
+}
+
+// Hold acquires the display and pins it: Release becomes a no-op until the
+// matching Unhold. Every Hold must be paired with an Unhold, or PPApp never
+// comes back — which is the dark-HDMI state this file exists to prevent.
+func (d *Display) Hold() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.acquireLocked(); err != nil {
+		return err
+	}
+	d.pinned++
+	return nil
+}
+
+// Unhold drops one pin and, when it was the last, restarts BirdDog's stack.
+func (d *Display) Unhold() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.pinned == 0 {
+		return
+	}
+	d.pinned--
+	if d.pinned == 0 {
+		d.restoreLocked()
+	}
+}
+
+func (d *Display) acquireLocked() error {
 	if d.held {
 		return nil
 	}
@@ -73,10 +109,15 @@ func (d *Display) Acquire() error {
 	return fmt.Errorf("PPApp still running 10s after stopping %s", birdDogRunner)
 }
 
-// Release restarts BirdDog's decode stack if we stopped it.
+// Release restarts BirdDog's decode stack if we stopped it. While the display
+// is pinned (see Hold) this does nothing: the pinning session decides when
+// PPApp gets the output back.
 func (d *Display) Release() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.pinned > 0 {
+		return
+	}
 	d.restoreLocked()
 }
 

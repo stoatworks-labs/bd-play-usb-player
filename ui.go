@@ -319,6 +319,30 @@ const controlPageHTML = `<!doctype html>
   </div>
 
   <div class="card">
+    <div class="row"><strong>TV remote</strong><span class="mut" id="remote-state">checking…</span></div>
+    <div class="row">
+      <button id="remote-enter">OPEN BROWSER ON HDMI</button>
+      <button id="remote-exit">BACK TO BIRDDOG</button>
+    </div>
+    <div class="row" id="remote-keys">
+      <button data-key="up">UP</button>
+      <button data-key="down">DOWN</button>
+      <button data-key="left">LEFT</button>
+      <button data-key="right">RIGHT</button>
+      <button data-key="select">OK</button>
+      <button data-key="back">EXIT</button>
+      <button data-key="play">PLAY</button>
+      <button data-key="stop">STOP</button>
+      <button data-key="prev">PREV</button>
+      <button data-key="next">NEXT</button>
+      <button data-key="yellow">LOOP</button>
+      <button data-key="blue">SHUFFLE</button>
+    </div>
+    <p class="mut">The same keys a CEC-capable TV sends from its remote. Pick <em>USB-Player</em> on the PLAY's own
+      on-screen source list (SRT page) to open the browser from the TV; the buttons here drive it without one.</p>
+  </div>
+
+  <div class="card">
     <strong>Status</strong>
     <table id="status"></table>
   </div>
@@ -386,6 +410,20 @@ function refresh() {
       return '<tr><td>' + r[0] + '</td><td>' + String(r[1]).replace(/[<>&]/g, '') + '</td></tr>';
     }).join('');
     if (p.error) err(new Error(p.error));
+    var rs = document.getElementById('remote-state'), rm = st.remote;
+    if (!rm) {
+      rs.textContent = 'disabled (-remote=false)';
+    } else if (!rm.active) {
+      rs.textContent = 'not in use — the PLAY is decoding as normal';
+    } else {
+      var bits = [rm.state === 'playing' ? ('playing ' + (rm.playing || '')) : ('browsing ' + (rm.dir || '/'))];
+      bits.push(rm.cec_error ? ('CEC unavailable: ' + rm.cec_error) : ('CEC address ' + rm.cec_logical_address));
+      if (rm.error) bits.push(rm.error);
+      rs.textContent = bits.join(' · ');
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('#remote-keys button'), function (b) {
+      b.disabled = !(rm && rm.active);
+    });
   }).catch(function () { document.getElementById('vol').textContent = 'bdplay unreachable'; });
 }
 function loadLog() {
@@ -412,6 +450,11 @@ document.getElementById('next').onclick   = function () { post('/api/next').then
 document.getElementById('prev').onclick   = function () { post('/api/prev').then(refresh).catch(err); };
 document.getElementById('rescan').onclick = function () { post('/api/rescan').then(loadLibrary).catch(err); };
 document.getElementById('eject').onclick  = function () { post('/api/eject').then(loadLibrary).catch(err); };
+document.getElementById('remote-enter').onclick = function () { err(null); post('/api/remote/enter').then(refresh).catch(err); };
+document.getElementById('remote-exit').onclick  = function () { err(null); post('/api/remote/exit').then(refresh).catch(err); };
+Array.prototype.forEach.call(document.querySelectorAll('#remote-keys button'), function (b) {
+  b.onclick = function () { post('/api/remote/key?name=' + b.getAttribute('data-key')).then(refresh).catch(err); };
+});
 
 document.getElementById('host').textContent = location.hostname;
 loadLibrary(); refresh(); loadLog();

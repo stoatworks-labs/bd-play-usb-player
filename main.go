@@ -29,6 +29,17 @@ func main() {
 		uiPath    = flag.String("ui-path", "/srv/birddog-web-ui/videoset.html", "birdUI template to patch")
 		unpatchUI = flag.Bool("unpatch-ui", false, "remove the USB entry from birdUI and exit")
 		showVer   = flag.Bool("version", false, "print version and exit")
+
+		// The TV-remote mode: an entry in the decoder's own on-screen source
+		// list (the one a CEC remote navigates) that opens a file browser,
+		// which the same remote then drives.
+		remoteOn    = flag.Bool("remote", true, "TV-remote mode: add an entry to the decoder's on-screen source list that opens a file browser driven over HDMI-CEC")
+		cecDevice   = flag.String("cec-device", "/dev/cec0", "CEC adapter for the TV remote; empty leaves the browser to the API only")
+		osdEntryNam = flag.String("osd-entry", DefaultOSDEntryName, "name of our entry in the decoder's SRT source list; empty adds none")
+		osdPort     = flag.Int("osd-port", DefaultTriggerPort, "loopback UDP port the decoder dials when the entry is chosen")
+		osdPipeline = flag.String("osd-pipeline", "auto", "how the browser reaches HDMI: auto, raw (fdsrc+rawvideoparse) or png (multifilesrc)")
+		etcDir      = flag.String("etc", "/etc", "where the decoder keeps its source files")
+		unregOSD    = flag.Bool("unregister-osd-entry", false, "remove our entry from the decoder's source list and exit")
 	)
 	flag.Parse()
 
@@ -45,6 +56,21 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("removed the USB entry from", *uiPath)
+		return
+	}
+
+	if *unregOSD {
+		entry := osdEntry{etc: *etcDir, name: *osdEntryNam, port: *osdPort}
+		changed, err := entry.Unregister()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "unregister:", err)
+			os.Exit(1)
+		}
+		if changed {
+			fmt.Println("removed", *osdEntryNam, "from", entry.listPath())
+		} else {
+			fmt.Println(*osdEntryNam, "was not in", entry.listPath())
+		}
 		return
 	}
 
@@ -89,6 +115,53 @@ func main() {
 
 	stop := make(chan struct{})
 
+	// The TV-remote session and the two ways into it: the decoder dialling
+	// our entry, and the API.
+	var remote *Remote
+	if *remoteOn {
+		screen := NewScreen(*osdPipeline, filepath.Join(*stateDir, "osd"), log)
+		remote = NewRemote(RemoteConfig{
+			CECPath:        *cecDevice,
+			OSDName:        "USB Player",
+			AnnounceActive: true,
+			Dwell:          *autoDwell,
+			Etc:            *etcDir,
+		}, display, player, screen, srv.Library, storage.Primary, DetectMode, log)
+		srv.remote = remote
+
+		if *osdEntryNam != "" {
+			entry := osdEntry{etc: *etcDir, name: *osdEntryNam, port: *osdPort}
+			switch changed, err := entry.Register(); {
+			case err != nil:
+				log.Warn("could not add %q to the decoder's source list (%v); use the API or web page to open the browser", *osdEntryNam, err)
+			case changed:
+				log.Info("added %q to the decoder's on-screen source list (SRT page)", *osdEntryNam)
+			default:
+				log.Info("%q is in the decoder's on-screen source list", *osdEntryNam)
+			}
+			guard := newSourceGuard(*etcDir, entry, log)
+			remote.guard = guard
+			go guard.Watch(stop, 2*time.Second)
+
+			trigger := newTriggerListener(*osdPort, log, func() {
+				go func() {
+					if err := remote.Enter("selected on the decoder's menu"); err != nil {
+						log.Error("remote: %v", err)
+					}
+				}()
+			})
+			remote.trigger = trigger
+			go func() {
+				if err := trigger.Run(stop); err != nil {
+					log.Error("trigger listener on 127.0.0.1:%d: %v — the on-screen entry will not open the browser", *osdPort, err)
+				}
+			}()
+		}
+		if *cecDevice != "" && !cecDeviceExists(*cecDevice) {
+			log.Warn("%s not found: the browser will open but the TV remote cannot drive it", *cecDevice)
+		}
+	}
+
 	// Scan once up front. Watch only fires its callback when the volume set
 	// changes, so without this a fixed -media-dir (which never "changes")
 	// would present an empty library until a stick was inserted.
@@ -97,6 +170,11 @@ func main() {
 	// Watch USB and keep the library in step.
 	go storage.Watch(stop, *scanEvery, func() {
 		srv.Rescan()
+		if remote != nil && remote.Active() {
+			// The browser redraws; autoplay would fight it for the display.
+			remote.Refresh()
+			return
+		}
 		if !*autoplay {
 			return
 		}
@@ -143,6 +221,9 @@ func main() {
 	log.Info("signal %v: shutting down", s)
 
 	close(stop)
+	if remote != nil {
+		remote.Exit()
+	}
 	player.Stop()
 	display.Release()
 
